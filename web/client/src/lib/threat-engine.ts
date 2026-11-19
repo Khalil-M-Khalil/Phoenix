@@ -579,3 +579,117 @@ export function triggerFileDownload(filename: string, content: string, mime: str
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export type VoipRiskReport = {
+  phoneNumber: string;
+  e164: string;
+  international: string;
+  country: string;
+  callingCode: string;
+  carrierType: "PHYSICAL_MOBILE" | "PHYSICAL_FIXED" | "VIRTUAL_VOIP" | "DISPOSABLE_VIRTUAL" | "TOLL_FREE_ABUSE" | "PREMIUM_RATE" | "UNKNOWN";
+  carrierTypeLabel: string;
+  riskScore: number;
+  riskLevel: "CRITICAL" | "HIGH" | "ELEVATED" | "LOW";
+  riskVerdict: string;
+  signals: string[];
+  recommendations: string[];
+};
+
+const VIRTUAL_FORWARDING_PREFIXES = [
+  "+4470", // UK Personal Numbering (famous fraud forwarding)
+  "+4476", // UK Pagers/Virtual
+  "+1800", "+1888", "+1877", "+1866", "+1855", "+1844", "+1833", // US Toll-free
+  "+1900", // US Premium
+  "+881", "+882", "+883", // Global satellite
+];
+
+export function assessVoipCarrier(parsedNumber: {
+  number: string;
+  formatInternational: () => string;
+  country?: string;
+  countryCallingCode: string;
+  getType?: () => string | undefined;
+}): VoipRiskReport {
+  const e164 = parsedNumber.number;
+  const international = parsedNumber.formatInternational();
+  const country = parsedNumber.country || "غير محدد";
+  const callingCode = `+${parsedNumber.countryCallingCode}`;
+  const rawType = parsedNumber.getType ? parsedNumber.getType() : undefined;
+
+  let score = 0;
+  const signals: string[] = [];
+  let carrierType: VoipRiskReport["carrierType"] = "PHYSICAL_MOBILE";
+  let carrierTypeLabel = "خط محمول حقيقي";
+
+  // Check UK Personal Numbering (+4470)
+  if (e164.startsWith("+4470")) {
+    carrierType = "DISPOSABLE_VIRTUAL";
+    carrierTypeLabel = "خط إعادة توجيه افتراضي عالي الخطورة (UK Personal Forwarding)";
+    score += 85;
+    signals.push("الرقم يقع ضمن نطاق +4470 سيء السمعة عالمياً، ويُستخدم لإعادة توجيه المكالمات إلى دول مجهولة لإخفاء الهوية.");
+  } else if (e164.startsWith("+1800") || e164.startsWith("+1888") || e164.startsWith("+1877") || e164.startsWith("+1866") || e164.startsWith("+1855") || e164.startsWith("+1844") || e164.startsWith("+1833")) {
+    carrierType = "TOLL_FREE_ABUSE";
+    carrierTypeLabel = "رقم مجاني افتراضي (Toll-Free)";
+    score += 55;
+    signals.push("الرقم يتبع نطاقات الأرقام المجانية الافتراضية؛ إذا اتصل بك مدعياً صفة شخص أو جهة حكومية فهو انتحال بنسبة عالية.");
+  } else if (rawType === "VOIP") {
+    carrierType = "VIRTUAL_VOIP";
+    carrierTypeLabel = "خط صوت عبر بروتوكول الإنترنت (VoIP)";
+    score += 70;
+    signals.push("الرقم مصنف كـ VoIP افتراضي (مثل Google Voice أو Skype أو TextNow)؛ يمكن استئجاره عبر الإنترنت في ثوانٍ بدون شريحة SIM فعلية.");
+  } else if (rawType === "PREMIUM_RATE") {
+    carrierType = "PREMIUM_RATE";
+    carrierTypeLabel = "خط مدفوع عالي التكلفة (Premium Rate)";
+    score += 80;
+    signals.push("الرقم مصنف كخدمة مدفوعة فائقة التكلفة تُستخدم في احتيال وانجيري (Wangiri) لدفع الضحية لإعادة الاتصال.");
+  } else if (rawType === "FIXED_LINE") {
+    carrierType = "PHYSICAL_FIXED";
+    carrierTypeLabel = "خط أرضي ثابت (Fixed Line)";
+    score += 15;
+    signals.push("الرقم مرتبط ببنية أرضية جغرافية محددة.");
+  } else {
+    carrierType = "PHYSICAL_MOBILE";
+    carrierTypeLabel = "شريحة اتصال متنقلة مسجلة (Cellular Mobile)";
+    score += 10;
+    signals.push("الرقم يتبع خطة ترقيم الهواتف الخلوية المتنقلة العادية.");
+  }
+
+  let riskLevel: VoipRiskReport["riskLevel"] = "LOW";
+  let riskVerdict = "إشارات الهوية مستقرة — خط خلوي قياسي";
+
+  if (score >= 70) {
+    riskLevel = "CRITICAL";
+    riskVerdict = "خطر مرتفع — رقم افتراضي مجهول الهوية أو مؤقت (VoIP/Disposable)";
+  } else if (score >= 40) {
+    riskLevel = "HIGH";
+    riskVerdict = "يتطلب الحذر — خط افتراضي أو مجاني قد يُستخدم للانتحال";
+  } else if (score >= 20) {
+    riskLevel = "ELEVATED";
+    riskVerdict = "خط ثابت — تحقق من السياق";
+  }
+
+  const recommendations: string[] = [];
+  if (score >= 50) {
+    recommendations.push("لا تقبل أي تحويلات مالية أو تأكيدات أمنية عبر هذا الرقم وحده.");
+    recommendations.push("اطلب من المتصل التواصل عبر قناة رسمية موثقة قبل إعطاء أي معلومة.");
+    recommendations.push("احذر من رسائل الـ WhatsApp أو Telegram القادمة من هذا الرقم.");
+  } else {
+    recommendations.push("الرقم يتبع خطة الترقيم القياسية، لكن تذكر أن الهواتف يمكن انتحالها عبر Caller ID Spoofing.");
+    recommendations.push("لا تعتمد فقط على رقم الهاتف كإثبات قاطع للهوية.");
+  }
+
+  return {
+    phoneNumber: e164,
+    e164,
+    international,
+    country,
+    callingCode,
+    carrierType,
+    carrierTypeLabel,
+    riskScore: score,
+    riskLevel,
+    riskVerdict,
+    signals,
+    recommendations,
+  };
+}
