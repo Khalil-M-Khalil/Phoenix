@@ -27,14 +27,16 @@ import {
   QrCode,
   Radar,
   ScanLine,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Upload,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
+import { ThreatForensicsStation } from "@/components/ThreatForensicsStation";
 
-type StationId = "number" | "link" | "message" | "qr" | "capsule";
+type StationId = "number" | "threat" | "link" | "message" | "qr" | "capsule";
 
 type NumberResult = {
   e164: string;
@@ -55,6 +57,7 @@ const phoenixMark = `${import.meta.env.BASE_URL}assets/phoenix-official-mark.web
 
 const stations: Array<{ id: StationId; label: string; sublabel: string; icon: typeof Phone }> = [
   { id: "number", label: "بنية الرقم", sublabel: "المحطة الأساسية", icon: Phone },
+  { id: "threat", label: "التهديدات والأدلة", sublabel: "فحص جنائي متقدم", icon: ShieldAlert },
   { id: "link", label: "سلامة الرابط", sublabel: "فحص محلي", icon: Link2 },
   { id: "message", label: "Phoenix Lens", sublabel: "نص الرسائل", icon: MessageSquareWarning },
   { id: "qr", label: "مختبر QR", sublabel: "صورة محلية", icon: QrCode },
@@ -311,7 +314,7 @@ export default function Home() {
             <h1>افحص <em>قبل</em> أن تثق.</h1>
             <p>أداة تحقق محلية لقراءة بنية الأرقام والإشارات المرتبطة بها. لا تتبع، لا رفع، ولا حكم على الأشخاص.</p>
             <div className="hero-actions"><button onClick={runQuickDemo}><ScanLine size={17} /> شغّل تجربة فورية</button><button onClick={() => setShowGuide(true)}>كيف أستخدم الأدوات؟ <ChevronLeft size={16} /></button></div>
-            <div className="hero-metrics"><span><strong>04</strong> محطات دفاعية</span><span><strong>0</strong> بيانات مرفوعة</span><span><strong>100%</strong> تحليل محلي</span></div>
+            <div className="hero-metrics"><span><strong>05</strong> محطات دفاعية</span><span><strong>0</strong> بيانات مرفوعة</span><span><strong>100%</strong> تحليل محلي</span></div>
           </div>
           <div className="hero-glass-card"><Radar size={25} /><span>ملاحظة تحقق</span><strong>التحقق المستقل<br />أقوى من الاستعجال.</strong><small>PHX / REVIEW 01</small></div>
         </section>
@@ -319,9 +322,13 @@ export default function Home() {
         {showGuide && <section className="try-guide"><div className="try-guide__head"><ClipboardCheck size={20} /><div><p>كيف تجرّبها خلال دقيقة؟</p><span>ابدأ بمثال جاهز، ثم جرّب بياناتك أنت فقط.</span></div><button onClick={() => setShowGuide(false)}>×</button></div><div className="try-guide__steps"><span><b>1</b> اختر محطة</span><span><b>2</b> استخدم المثال</span><span><b>3</b> اقرأ الإشارات</span><span><b>4</b> انسخ التقرير</span></div></section>}
 
         <section className="command-workspace" id="workspace">
-          <div className="workspace-head"><div><p className="command-kicker">المحطة النشطة / {currentStation.label}</p><h2>{station === "number" ? "فحص بنية رقم دولي" : station === "link" ? "اقرأ الرابط قبل فتحه" : station === "message" ? "ضع الرسالة تحت العدسة" : station === "qr" ? "فك محتوى QR بأمان" : "اجمع الأدلة قبل أن يختفي السياق"}</h2><div className="measurement-strip" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /><span /></div></div><div className={`safety-chip safety-chip--${station === "capsule" ? "neutral" : safetyBand.tone}`}><ShieldCheck size={16} /> {station === "capsule" ? "جلسة محلية" : safetyBand.label}</div></div>
-          <div className={`workspace-grid ${station === "capsule" ? "workspace-grid--capsule" : ""}`}>
-            {station === "capsule" ? <EvidenceCapsule source={capsuleSource} onActivity={setActivity} /> : <><section className="tool-console">
+          <div className="workspace-head"><div><p className="command-kicker">المحطة النشطة / {currentStation.label}</p><h2>{station === "number" ? "فحص بنية رقم دولي" : station === "threat" ? "التحقيق الجنائي وكشف التهديدات المتقدمة" : station === "link" ? "اقرأ الرابط قبل فتحه" : station === "message" ? "ضع الرسالة تحت العدسة" : station === "qr" ? "فك محتوى QR بأمان" : "اجمع الأدلة قبل أن يختفي السياق"}</h2><div className="measurement-strip" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /><span /></div></div><div className={`safety-chip safety-chip--${station === "capsule" || station === "threat" ? "neutral" : safetyBand.tone}`}><ShieldCheck size={16} /> {station === "threat" ? "تحقيق جنائي محلي" : station === "capsule" ? "جلسة محلية" : safetyBand.label}</div></div>
+          <div className={`workspace-grid ${station === "capsule" || station === "threat" ? "workspace-grid--capsule" : ""}`}>
+            {station === "threat" ? (
+              <ThreatForensicsStation onActivity={setActivity} />
+            ) : station === "capsule" ? (
+              <EvidenceCapsule source={capsuleSource} onActivity={setActivity} />
+            ) : <><section className="tool-console">
               {station === "number" && <form onSubmit={analyzeNumber}><ToolLabel icon={Phone} label="رقم دولي" hint="مثال: +12025550123" /><div className="command-input"><span>+ / E.164</span><input value={numberInput} onChange={(event) => setNumberInput(event.target.value)} placeholder="+12025550123" dir="ltr" /></div><div className="tool-actions"><button className="primary-action" type="submit"><ScanLine size={17} /> تحليل الرقم</button><button type="button" className="ghost-action" onClick={() => { const value = "+12025550123"; setNumberInput(value); readNumber(value); }}>تشغيل مثال</button></div></form>}
               {station === "link" && <form onSubmit={analyzeLink}><ToolLabel icon={Link2} label="رابط للفحص" hint="لن نفتح الرابط" /><div className="command-input"><span>URL</span><input value={linkInput} onChange={(event) => setLinkInput(event.target.value)} placeholder="https://example.com/login" dir="ltr" /></div><div className="tool-actions"><button className="primary-action" type="submit"><ShieldCheck size={17} /> فحص الرابط</button><button type="button" className="ghost-action" onClick={() => { const value = "http://notice@127.0.0.1:8080/update.exe?redirect=https%3A%2F%2Fexample.com"; setLinkInput(value); readLink(value); }}>تشغيل مثال</button></div></form>}
               {station === "message" && <form onSubmit={analyzeMessage}><ToolLabel icon={MessageSquareWarning} label="رسالة أو محتوى بريد" hint="لا يخرج النص من المتصفح" /><textarea className="command-textarea" value={messageInput} onChange={(event) => setMessageInput(event.target.value)} placeholder="ألصق رسالة وصلت إليك هنا…" /><div className="tool-actions"><button className="primary-action" type="submit"><Radar size={17} /> تحليل تحت العدسة</button><button type="button" className="ghost-action" onClick={() => { const value = "عاجل: تم تعليق حسابك. افتح https://bit.ly/verify وأدخل كلمة المرور ورمز OTP الآن."; setMessageInput(value); readMessage(value); }}>تشغيل مثال</button></div></form>}
