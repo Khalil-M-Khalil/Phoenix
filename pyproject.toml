@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phoenix-tool"
-version = "2026.1.0"
-description = "A desktop utility for public phone numbering-plan metadata and authorised enrichment workflows."
+version = "2026.2.0"
+description = "A local-first cyber threat intelligence, forensic uncloaking, and defensive reconnaissance suite."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -53,7 +53,7 @@ Repository = "https://github.com/Khalil-M-Khalil/Phoenix"
 Issues = "https://github.com/Khalil-M-Khalil/Phoenix/issues"
 
 [tool.setuptools]
-py-modules = ["phoenix", "config", "osint_analyzer", "phone_analyzer"]
+py-modules = ["phoenix", "config", "osint_analyzer", "phone_analyzer", "threat_engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

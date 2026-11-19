@@ -16,7 +16,7 @@ import tkinter as tk
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Any, TypeVar
 
 import folium
@@ -24,6 +24,12 @@ import folium
 from config import SETTINGS
 from osint_analyzer import OSINTAnalyzer
 from phone_analyzer import PhoneAnalyzer, PhoneInfo
+from threat_engine import (
+    ForensicDossierBuilder,
+    ForensicMediaEngine,
+    TelecomThreatEngine,
+    URLThreatEngine,
+)
 
 APP_NAME = "Phoenix"
 APP_VERSION = "2026.1.0"
@@ -55,6 +61,9 @@ class PhoneAnalyzerGUI:
         self.osint_phone_var = tk.StringVar()
         self.username_var = tk.StringVar()
         self.network_target_var = tk.StringVar()
+        self.threat_url_var = tk.StringVar()
+        self.threat_media_var = tk.StringVar()
+        self.latest_evidence: list[dict[str, Any]] = []
 
         self._configure_style()
         self._build_layout()
@@ -106,6 +115,7 @@ class PhoneAnalyzerGUI:
         self.notebook.grid(row=3, column=0, sticky="nsew", pady=(12, 10))
         self._build_overview_tab()
         self._build_enrichment_tab()
+        self._build_threat_tab()
         self._build_network_tab()
         self._build_map_tab()
         self._build_about_tab()
@@ -167,6 +177,46 @@ class PhoneAnalyzerGUI:
             self.osint_text,
             "Optional enrichment can contact third-party providers. It is disabled until you confirm authorisation. "
             "Missing API keys or optional packages are reported with setup guidance.",
+        )
+
+    def _build_threat_tab(self) -> None:
+        frame = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(frame, text="Threat & Forensics")
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(4, weight=1)
+
+        # URL Uncloaker
+        ttk.Label(frame, text="Suspicious Link / URL").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=self.threat_url_var).grid(row=0, column=1, sticky="ew", pady=4)
+        self.uncloak_button = ttk.Button(frame, text="Uncloak & Analyze", command=self.start_url_uncloak)
+        self.uncloak_button.grid(row=0, column=2, padx=(8, 0), pady=4)
+
+        # Forensic Media
+        ttk.Label(frame, text="Media File (EXIF & ELA)").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=self.threat_media_var).grid(row=1, column=1, sticky="ew", pady=4)
+        media_btn_frame = ttk.Frame(frame)
+        media_btn_frame.grid(row=1, column=2, padx=(8, 0), pady=4)
+        ttk.Button(media_btn_frame, text="Browse", command=self.browse_media_file).pack(side="left", padx=(0, 4))
+        self.media_forensics_button = ttk.Button(media_btn_frame, text="Audit Image", command=self.start_media_forensics)
+        self.media_forensics_button.pack(side="left")
+
+        # Dossier Export
+        dossier_bar = ttk.Frame(frame)
+        dossier_bar.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+        ttk.Button(dossier_bar, text="Export Incident Evidence Dossier (.md)", command=self.export_evidence_dossier).pack(side="left")
+
+        ttk.Separator(frame, orient="horizontal").grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+
+        # Console Output
+        self.threat_console_text = scrolledtext.ScrolledText(frame, wrap=tk.WORD, state="disabled", font="TkFixedFont")
+        self.threat_console_text.grid(row=4, column=0, columnspan=3, sticky="nsew")
+        self._replace_text(
+            self.threat_console_text,
+            "Phoenix Threat Intelligence & Forensic Console v2.0\n"
+            + "=" * 65 + "\n"
+            + "1. Deep URL Uncloaker: Traces multi-hop redirects, queries ICANN RDAP for domain age, and calculates Favicon hash signatures to detect brand spoofing.\n"
+            + "2. Forensic Media & ELA: Extracts camera EXIF, GPS coords, and runs Error Level Analysis to detect spliced pixels and forged screenshots.\n"
+            + "3. Dossier Generator: Compiles cryptographic chain-of-custody reports for incident response.\n"
         )
 
     def _build_network_tab(self) -> None:
@@ -290,22 +340,30 @@ class PhoneAnalyzerGUI:
     def _show_phone_analysis(self, result: tuple[PhoneAnalyzer, PhoneInfo]) -> None:
         self.current_phone, self.current_phone_info = result
         info = self.current_phone_info
+
+        # Telecom & VoIP Assessment
+        telecom_assessment = TelecomThreatEngine.assess_number(info.carrier, info.number_type, info.country_code)
+        voip_status = "CRITICAL: Cloud/Disposable VoIP Gateway (No Physical SIM)" if telecom_assessment["is_virtual_voip"] else "Standard Physical Cellular / Landline Carrier"
+
         text = (
-            "Phone metadata\n"
-            f"{'=' * 60}\n"
+            "Phone metadata & Telecom Carrier Assessment\n"
+            f"{'=' * 65}\n"
             f"International format: {info.international}\n"
             f"National format:      {info.national}\n"
             f"E.164 format:         {info.e164}\n"
             f"Region:               {info.region}\n"
             f"Country/region code:  {info.country_code or 'Unknown'}\n"
             f"Carrier label:        {info.carrier or 'Unknown'}\n"
+            f"Carrier Anonymity:    {voip_status}\n"
             f"Time zone(s):         {', '.join(info.timezones) or 'Unknown'}\n"
             f"Number type:          {info.number_type}\n\n"
-            "Interpretation notice: these fields are public numbering-plan metadata. They do not identify a subscriber or provide the real-time location of a device."
+            "Forensic notes:\n"
+            + (f"- Alert: Number resolves to virtual provider '{telecom_assessment['detected_provider']}'. High anonymity disposable identity.\n" if telecom_assessment["is_virtual_voip"] else "- Standard numbering plan line. No disposable VoIP gateway flagged.\n")
+            + "\nInterpretation notice: these fields are public numbering-plan metadata. They do not identify a subscriber or provide the real-time location of a device."
         )
         self._replace_text(self.basic_info_text, text)
         self.view_map_button.state(["!disabled"])
-        self.status_var.set("Phone metadata is ready.")
+        self.status_var.set("Phone metadata and telecom carrier assessment ready.")
 
     def _run_enrichment(self, button: ttk.Button, operation: str, work: Callable[[], str]) -> None:
         if not self._require_authorisation():
@@ -477,6 +535,171 @@ class PhoneAnalyzerGUI:
             "This map represents the broad numbering-plan region only. It is not a location for a person, phone or device.",
         )
         self.status_var.set("Region map generated.")
+
+    def start_url_uncloak(self) -> None:
+        url = self.threat_url_var.get().strip()
+        if not url:
+            messagebox.showwarning(APP_NAME, "Enter a link or URL to uncloak first.")
+            return
+
+        def work() -> str:
+            engine = URLThreatEngine()
+            report = engine.uncloak(url)
+
+            # Record evidence
+            self.latest_evidence.append({
+                "title": f"URL Uncloak: {url[:40]}",
+                "target": report.final_url,
+                "risk_level": report.risk_level,
+                "threat_score": report.threat_score,
+                "summary": f"Traversed {report.total_hops} hops to {report.final_url}. RDAP Age: {report.domain_telemetry.age_days or 'Unknown'} days.",
+                "indicators": report.detected_indicators,
+            })
+
+            lines = [
+                "PHOENIX DEEP URL & PHISHING INVESTIGATION REPORT",
+                "=" * 65,
+                f"Start URL:    {report.initial_url}",
+                f"Resolved To:  {report.final_url}",
+                f"Total Hops:   {report.total_hops}",
+                f"Threat Score: {report.threat_score} / 100",
+                f"Risk Level:   [{report.risk_level}]",
+                "",
+                "--- Multi-Hop Redirect Trace ---",
+            ]
+            for h in report.hops:
+                lines.append(f"Hop #{h.hop}: HTTP {h.status_code} ({h.response_time_ms}ms) -> {h.url}")
+                if h.ip:
+                    lines.append(f"       Resolved IP: {h.ip} | Server: {h.server or 'Hidden/CDN'}")
+                if h.location:
+                    lines.append(f"       Redirect Target: {h.location}")
+
+            lines.append("")
+            lines.append("--- Domain & RDAP Telemetry ---")
+            dt = report.domain_telemetry
+            lines.append(f"Domain Name:     {dt.domain}")
+            lines.append(f"Creation Date:   {dt.registered_date or 'Not disclosed / Unknown'}")
+            lines.append(f"Domain Age:      {f'{dt.age_days} days' if dt.age_days is not None else 'Unknown'}")
+            if dt.is_recently_registered:
+                lines.append("Alert:           [!] DOMAIN REGISTERED UNDER 30 DAYS AGO (High Risk)")
+            lines.append(f"Registrar:       {dt.registrar_name or 'Unknown'}")
+            lines.append(f"Abuse Email:     {dt.abuse_contact_email or 'N/A'}")
+
+            lines.append("")
+            lines.append("--- Favicon & Brand Spoofing ---")
+            fi = report.favicon_intel
+            if fi.found:
+                lines.append(f"Favicon Found:   {fi.favicon_url}")
+                lines.append(f"Favicon MD5:     {fi.md5_hash}")
+                if fi.is_impersonation:
+                    lines.append(f"CRITICAL ALERT:  [!] BRAND SPOOF DETECTED! Impersonating {fi.matched_brand}!")
+                elif fi.matched_brand:
+                    lines.append(f"Brand Match:     Verified official {fi.matched_brand}")
+                else:
+                    lines.append("Brand Match:     No known targeted brand icon matched.")
+            else:
+                lines.append("Favicon:         None detected or unreachable.")
+
+            lines.append("")
+            lines.append("--- Detected Risk Indicators ---")
+            if report.detected_indicators:
+                for ind in report.detected_indicators:
+                    lines.append(f"  * {ind}")
+            else:
+                lines.append("  [✓] No immediate deceptive patterns flagged.")
+
+            return "\n".join(lines)
+
+        self._run_background(
+            self.uncloak_button,
+            "Uncloaking URL and probing threat telemetry…",
+            work,
+            lambda res: self._replace_text(self.threat_console_text, res),
+        )
+
+    def browse_media_file(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Select image for forensic analysis",
+            filetypes=[("Image Files", "*.jpg;*.jpeg;*.png;*.webp;*.bmp"), ("All Files", "*.*")],
+        )
+        if filename:
+            self.threat_media_var.set(filename)
+
+    def start_media_forensics(self) -> None:
+        filepath = self.threat_media_var.get().strip()
+        if not filepath or not Path(filepath).is_file():
+            messagebox.showwarning(APP_NAME, "Select a valid image file first.")
+            return
+
+        def work() -> str:
+            exif = ForensicMediaEngine.inspect_exif(filepath)
+            ela = ForensicMediaEngine.analyze_ela(filepath)
+
+            # Record evidence
+            self.latest_evidence.append({
+                "title": f"Media Forensics: {exif.file_name}",
+                "target": filepath,
+                "risk_level": "ELEVATED" if (exif.is_software_edited or ela.tampering_suspected) else "CLEAN",
+                "threat_score": 75 if ela.tampering_suspected else (40 if exif.is_software_edited else 10),
+                "summary": f"Camera: {exif.camera_make or 'N/A'}. Edited: {exif.is_software_edited}. ELA Tampering: {ela.tampering_suspected}.",
+                "indicators": exif.indicators + [ela.details],
+            })
+
+            lines = [
+                "PHOENIX FORENSIC MEDIA & TAMPERING AUDIT REPORT",
+                "=" * 65,
+                f"File Name:        {exif.file_name}",
+                f"File Size:        {exif.file_size_bytes} bytes",
+                f"SHA-256 Hash:     {exif.sha256}",
+                "",
+                "--- EXIF & Camera Telemetry ---",
+                f"Camera Make:      {exif.camera_make or 'None / Stripped'}",
+                f"Camera Model:     {exif.camera_model or 'None / Stripped'}",
+                f"Software Editor:  {exif.software_editor or 'None detected'}",
+                f"DateTime Orig:    {exif.datetime_original or 'None / Stripped'}",
+                f"GPS Coordinates:  {f'{exif.gps_latitude}, {exif.gps_longitude}' if exif.gps_latitude else 'None / Stripped'}",
+            ]
+            if exif.google_maps_url:
+                lines.append(f"GPS Map Link:     {exif.google_maps_url}")
+            if exif.is_software_edited:
+                lines.append(f"Alert:            [!] Image saved via photo editor ({exif.software_editor})")
+
+            lines.append("")
+            lines.append("--- Error Level Analysis (ELA) Tampering Check ---")
+            lines.append(f"Format:           {'JPEG (Supported)' if ela.is_jpeg else 'Non-JPEG'}")
+            lines.append(f"Peak Error Delta: {ela.max_difference}")
+            lines.append(f"Mean Error Delta: {ela.mean_squared_error}")
+            lines.append(f"Tamper Suspected: {ela.tampering_suspected} (Confidence: {ela.confidence_score}%)")
+            lines.append(f"Assessment:       {ela.details}")
+
+            return "\n".join(lines)
+
+        self._run_background(
+            self.media_forensics_button,
+            "Running forensic EXIF and ELA audit…",
+            work,
+            lambda res: self._replace_text(self.threat_console_text, res),
+        )
+
+    def export_evidence_dossier(self) -> None:
+        if not self.latest_evidence:
+            messagebox.showinfo(
+                APP_NAME,
+                "No investigation evidence captured yet. Run a URL uncloak, phone analysis, or media audit first.",
+            )
+            return
+
+        dossier_dir = APP_DIRECTORY / "dossiers"
+        dossier_dir.mkdir(parents=True, exist_ok=True)
+        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = dossier_dir / f"PHOENIX_EVIDENCE_{timestamp_str}.md"
+
+        content = ForensicDossierBuilder.build_markdown_report("Incident Investigation", self.latest_evidence)
+        report_path.write_text(content, encoding="utf-8")
+
+        webbrowser.open(report_path.as_uri())
+        self.status_var.set(f"Dossier exported to {report_path.name}")
+        messagebox.showinfo(APP_NAME, f"Forensic dossier successfully exported and opened:\n{report_path}")
 
     def clear_results(self) -> None:
         self.phone_var.set("")
