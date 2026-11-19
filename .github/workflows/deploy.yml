@@ -33,7 +33,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Web Client for GitHub Pages
         working-directory: web
